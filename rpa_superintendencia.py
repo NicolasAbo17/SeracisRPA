@@ -124,7 +124,7 @@ descargarEmpleadosSemantica()
 empleados = leerEmpleados()
 
 descargarSupervigilancia(acreditadosUrl)
-acreditados = leerAcreditados(acreditadosArchivo)
+acreditados = leerSupervigilancia(acreditadosArchivo)
 acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
 descargarSupervigilancia(enprocesoUrl)
@@ -138,7 +138,6 @@ fec_hoy = datetime.now()
 fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
 new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
 empleados.to_excel(new_file, index=False, header=True)
-
 # empleados = pd.read_excel("Acreditados25_10_2022_13_34.xlsx")
 
 driver.quit()
