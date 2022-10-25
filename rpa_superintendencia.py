@@ -42,6 +42,7 @@ acreditadosArchivo = "Informacion de Companias.xlsx"
 seracisNit = "811007280"
 
 enprocesoUrl = "https://apo.supervigilancia.gov.co/Acreditapo/BuscaEnTram.aspx"
+enprocesoArchivo = "Informacion de Companias (1).xlsx"
 
 # Functions
 
@@ -75,13 +76,15 @@ def descargarEmpleadosSemantica():
     time.sleep(10)
 
 def leerEmpleados():
-    empleados = pd.read_excel(directorioDes + "/" + empleadosArchivo)
-    empleados.drop(empleados.columns.difference(empleadosColumnas), 1, inplace=True)
-    empleados = empleados[empleados['CARGO'].isin(empleadosCargos)]
-    return empleados
+    df = pd.read_excel(directorioDes + "/" + empleadosArchivo)
+    df.drop(df.columns.difference(empleadosColumnas), 1, inplace=True)
+    df = df[df['CARGO'].isin(empleadosCargos)]
+    df.loc[df['CARGO'] == empleadosCargos[2], 'CARGO'] = 'OPERADOR DE MEDIOS TECNOLOGICOS'
+    df['FECHA.ACR'] = 'Na'
+    return df.sort_values(by=['IDENTIFICACIÓN', 'CARGO'], ascending=[True, True])
 
-def descargarSupervigilancia(): 
-    driver.get(acreditadosUrl)
+def descargarSupervigilancia(url): 
+    driver.get(url)
 
     a = driver.find_element(By.ID, 'ctl00_contentMaster_TxNit')
     a.send_keys(seracisNit)
@@ -95,42 +98,47 @@ def descargarSupervigilancia():
     time.sleep(5)
     driver.close()
 
-def leerAcreditados():
-    return pd.read_excel(directorioDes + "/" + acreditadosArchivo, skiprows=[0])
+def leerSupervigilancia(filename):
+    return pd.read_excel(directorioDes + "/" + filename, skiprows=[0])
+
+def aniadirFecha(df1, df2):
+    i = 0
+    j = 0
+    while i < df1.shape[0] and j < df2.shape[0]:
+        if df1.loc[df1.index[i],'IDENTIFICACIÓN'] == df2.loc[df2.index[j],'IdNum']:
+            if df1.loc[df1.index[i],'CARGO'].strip() == df2.loc[df2.index[j],'Cargo'].strip():
+                df1.loc[df1.index[i],'FECHA.ACR'] = df2.loc[df2.index[j],'Vigen.Acr']
+                i += 1
+            j += 1
+        else:
+            if(df1.iloc[i]['IDENTIFICACIÓN'] < df2.iloc[j]['IdNum']):
+                i+=1
+            else:
+                j+=1
+    return df1
+
 
 
 # Process
-# descargarEmpleadosSemantica()
-# empleados = leerEmpleados()
-# empleados.loc[empleados['CARGO'] == empleadosCargos[2], 'CARGO'] = 'OPERADOR DE MEDIOS TECNOLOGICOS'
-# empleados['FECHA.ACR'] = ''
-# empleados = empleados.sort_values(by=['IDENTIFICACIÓN', 'CARGO'], ascending=[True, True])
+descargarEmpleadosSemantica()
+empleados = leerEmpleados()
 
-# descargarSupervigilancia()
-# acreditados = leerAcreditados()
-# acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
+descargarSupervigilancia(acreditadosUrl)
+acreditados = leerAcreditados(acreditadosArchivo)
+acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
-# i = 0
-# j = 0
-# while i < empleados.shape[0] and j < acreditados.shape[0]:
-#     if empleados.loc[empleados.index[i],'IDENTIFICACIÓN'] == acreditados.loc[acreditados.index[j],'IdNum']:
-#         if empleados.loc[empleados.index[i],'CARGO'].strip() == acreditados.loc[acreditados.index[j],'Cargo'].strip():
-#             print(empleados.loc[empleados.index[i],'IDENTIFICACIÓN'])
-#             empleados.loc[empleados.index[i],'FECHA.ACR'] = acreditados.loc[acreditados.index[j],'Vigen.Acr']
-#             print(empleados.loc[empleados.index[i],'FECHA.ACR'])
-#             i += 1
-#         j += 1
-#     else:
-#         if(empleados.iloc[i]['IDENTIFICACIÓN'] < acreditados.iloc[j]['IdNum']):
-#             i+=1
-#         else:
-#             j+=1
+descargarSupervigilancia(enprocesoUrl)
+enproceso = leerSupervigilancia(enprocesoArchivo)
+enproceso = enproceso.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
-# fec_hoy = datetime.now()
-# fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
-# new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
-# empleados.to_excel(new_file, index=False, header=True)
+empleados = aniadirFecha(empleados, enproceso)
+empleados = aniadirFecha(empleados, acreditados)
 
-empleados = pd.read_excel("Acreditados25_10_2022_13_34.xlsx")
+fec_hoy = datetime.now()
+fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
+new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
+empleados.to_excel(new_file, index=False, header=True)
+
+# empleados = pd.read_excel("Acreditados25_10_2022_13_34.xlsx")
 
 driver.quit()
