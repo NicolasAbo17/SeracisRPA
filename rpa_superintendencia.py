@@ -159,27 +159,27 @@ def aniadirFecha(df1, df2):
 
 # Process
 # Descarga de supervigilancia las personas en proceso de acreditación y ya acreditadas
-# descargarSupervigilancia(acreditadosUrl)
-# acreditados = leerSupervigilancia(acreditadosArchivo)
-# acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
+descargarSupervigilancia(acreditadosUrl)
+acreditados = leerSupervigilancia(acreditadosArchivo)
+acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
-# descargarSupervigilancia(enprocesoUrl)
-# enproceso = leerSupervigilancia(enprocesoArchivo)
-# enproceso = enproceso.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
+descargarSupervigilancia(enprocesoUrl)
+enproceso = leerSupervigilancia(enprocesoArchivo)
+enproceso = enproceso.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
 subirListaAcreditados()
 
-# # Descarga los empleados como están registrados actualmente en semantica
-# descargarEmpleadosSemantica()
-# empleados = leerEmpleados()
+# Descarga los empleados como están registrados actualmente en semantica
+descargarEmpleadosSemantica()
+empleados = leerEmpleados()
 
-# # Añade la fecha de acreditación a quienes la tengan
-# empleados = aniadirFecha(empleados, enproceso)
-# empleados = aniadirFecha(empleados, acreditados)
+# Añade la fecha de acreditación a quienes la tengan
+empleados = aniadirFecha(empleados, enproceso)
+empleados = aniadirFecha(empleados, acreditados)
 
-# # fec_hoy = datetime.now()
-# # fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
-# # new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
-# # empleados.to_excel(new_file, index=False, header=True)
+# fec_hoy = datetime.now()
+# fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
+# new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
+# empleados.to_excel(new_file, index=False, header=True)
 
 driver.quit()
