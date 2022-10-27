@@ -1,4 +1,5 @@
-# Librerias
+# Librerias selenium xlwt pandas xlrd
+from calendar import month
 from trace import Trace
 from xmlrpc.client import boolean
 import selenium
@@ -33,8 +34,9 @@ options.experimental_options["prefs"] = chrome_prefs
 driver = webdriver.Chrome(executable_path=r'C:\Users\nicol\Downloads\chromedriver_win32\chromedriver.exe',chrome_options=options)
 wait = WebDriverWait(driver, 10)
 
-# Paths
+# Paths 
 directorioDes = r"C:\Users\nicol\Downloads"
+directorioApo = r"C:\Users\nicol\Downloads\APOS"
 
 acreditadosUrl = "https://apo.supervigilancia.gov.co/AcreditaPO/BuscaEmprapo.aspx"
 acreditadosArchivo = "Informacion de Companias.xlsx"
@@ -50,6 +52,12 @@ usuarioSemantica = "L.BOTERO"
 empleadosArchivo = "empleados.xlsx"
 empleadosColumnas = ['NOMBRE', 'IDENTIFICACIÓN', 'FECHA_DESDE', 'CARGO', 'ZONA', 'SUBZONA']
 empleadosCargos = ['ESCOLTA', 'MANEJADOR CANINO', 'OPERADOR (A) MEDIOS TECNOLOGICOS', 'SUPERVISOR', 'SUPERVISOR CANINO', 'SUPERVISOR CENTRAL DE MONITOREO', 'SUPERVISOR DE CONTROL DE COMUNICACIONES', 'SUPERVISOR DE PORTERIA', 'SUPERVISOR DE ZONA', 'VIGILANTE']
+
+apoInicio = "APO8110072801"
+retirosVacios = pd.DataFrame(columns=['Nit','RazonSocial','TipoDocumento','NoDocumento','FechaRetiro'])
+registrosVacios = pd.DataFrame(columns=['Nit','RazonSocial','TipoDocumento','NoDocumento','FechaRetiro','Nombre1','Nombre2','Apellido1','Apellido2',
+'FechaNacimiento','Genero','Cargo','FechaVinculacion','CodigoCurso','NitEscuela','Nro','TipoEstablecimiento','TelefonoR','DireccionR','DireccionP',
+'departamento','Ciudad','EducacionBM','EducacionS','Discapacidad'])
 
 global loginBool
 loginBool = False
@@ -171,7 +179,7 @@ def aniadirFecha(df1, df2, col):
     j = 0
     while i < df1.shape[0] and j < df2.shape[0]:
         if df1.loc[df1.index[i],'IDENTIFICACIÓN'] == df2.loc[df2.index[j],'IdNum']:
-            if df1.loc[df1.index[i],'CARGO'].strip() == df2.loc[df2.index[j],'Cargo'].strip():
+            if df2.loc[df2.index[j],'Cargo'].strip() in df1.loc[df1.index[i],'CARGO'].strip():
                 df1.loc[df1.index[i],'FECHA.ACR'] = df2.loc[df2.index[j],col]
                 i += 1
             j += 1
@@ -182,14 +190,50 @@ def aniadirFecha(df1, df2, col):
                 j+=1
     return df1
 
+def verificarNro(nro):
+    if not nro.startswith('ECSP'):
+        for chr in nro:
+            if chr.isdigit():
+                nro = 'ECSP' + nro[nro.index(chr):]
+                break
+
+    for chr in nro:
+        if chr == '-':
+            if nro[nro.index(chr)+1] == '1':
+                nro = nro[:nro.index(chr)+1] + 'I' + nro[nro.index(chr)+2:]
+            break
+
+    return nro
+
+def obtenerTextoFecha():
+    todayDate = datetime.today()
+    todayYear = str(todayDate.year)
+    todayMonth = str(todayDate.month)
+    todayDay = str(todayDate.day)
+    month = todayDate.month
+    day = todayDate.day
+
+    if month < 10:
+        todayMonth = "0" + str(month)
+    if day < 10:
+        todayDay = "0" + str(day)
+    return todayYear + todayMonth + todayDay
+
 def descargarApos():
     driver.get(subirAcreditacionUrl)
     loginSemantica()
 
+    if not os.path.exists(directorioApo):
+        os.makedirs(directorioApo)
+
     informe_completo = pd.DataFrame()
+    faltan = pd.DataFrame()
+    apo_num = 1
+
     # for i in range(0,len(empleados.index)):
     for i in range(0,len(empleados.index)):
-        iden = str(empleados.loc[i,['IDENTIFICACIÓN']].item())
+        iden = str(empleados.loc[empleados.index[i],['IDENTIFICACIÓN']].item())
+        cargo = str(empleados.loc[empleados.index[i],['CARGO']].item())
         
         empl_bus = driver.find_element(By.ID, 'form_numeroIdentificacion')
         empl_bus.clear()
@@ -197,49 +241,93 @@ def descargarApos():
 
         empl_filtro = driver.find_element(By.ID, 'form_btnFiltro')
         empl_filtro.click()
-        time.sleep(2)
+        time.sleep(1)
 
         btn_archivos = driver.find_element(By.ID, 'archivos')
         btn_archivos.click()
         btn_informe = driver.find_element(By.ID, 'form_btnInformeApo')
         btn_informe.click()
+        
+        index = -1
+        rows = len(driver.find_elements(By.XPATH,"//table/tbody/tr"))
+
+        for t_row in range(1, (rows + 1)):
+            xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(7) + "]"
+            t_cargo = driver.find_element(By.XPATH, xPath).text
+            xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(8) + "]"
+            fecha = datetime.strptime(driver.find_element(By.XPATH, xPath).text, "%Y-%m-%d")
+            if(t_cargo in cargo and (fecha - datetime.today()).days > 30):
+                index = t_row - 1
+        
         time.sleep(2)
 
-        filename = max([directorioDes +'\\'+ f for f in os.listdir(directorioDes)], key=os.path.getctime)
-        print(filename)
-
+        filename = max(glob.glob(directorioDes + r'\*.xls'), key=os.path.getctime)
         informe_apo = leerUltimo(False, True, True)
-        informe_completo = pd.concat([informe_completo, informe_apo], ignore_index=True)
+        if index != -1:
+            informe_apo = informe_apo.iloc[[index]]
+            informe_completo = pd.concat([informe_completo, informe_apo], ignore_index=True)
+        else:
+            faltan = faltan.append(empleados.iloc[[i]], ignore_index=True)
         
-    print(informe_completo.head())
+        if len(informe_completo.index) >= 10:
+            informe_completo.loc[informe_completo['Ciudad'] == 'BOGOTA D.C.', 'Ciudad'] = 'BOGOTA'
+            informe_completo.loc[informe_completo['TelefonoR'] == 0, 'TelefonoR'] = 448518
+            informe_completo.loc[informe_completo['TelefonoR'] == 'NO FIGURA', 'TelefonoR'] = 448518
+            informe_completo['Nro'] = informe_completo['Nro'].apply(verificarNro)
 
-# # Process
-# # Descarga de supervigilancia las personas en proceso de acreditación y ya acreditadas
-# descargarSupervigilancia(acreditadosUrl)
-# acreditados = leerSupervigilancia()
-# acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
+            filename = apoInicio + obtenerTextoFecha()
+            if apo_num >= 10:
+                filename += str(apo_num)
+            else:
+                filename += "0" + str(apo_num)
+            filename += ".xls"
+            apo_num += 1
 
-# descargarSupervigilancia(enprocesoUrl)
-# enproceso = leerSupervigilancia()
-# enproceso = enproceso.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
+            print(directorioApo + "/" + filename)
+            
+            with pd.ExcelWriter(directorioApo + "/" + filename) as writer:
+                informe_completo.to_excel(writer, index=False, header=True, sheet_name="ApoDatos")
+                retirosVacios.to_excel(writer, index=False, header=True, sheet_name="Retiros")
+            informe_completo = pd.DataFrame()
+    
+    if informe_completo.shape[0] > 0:
+        filename = filename[:-6]
+        if apo_num >= 10:
+            filename += str(apo_num)
+        else:
+            filename += "0" + str(apo_num)
+        filename += ".xlsx"
 
-# subirListaAcreditados()
+        informe_completo.to_excel(filename, index=False, header=True)
+    faltan.to_excel(directorioDes + "/faltan.xlsx", index=False, header=True)
 
-# # Descarga los empleados como están registrados actualmente en semantica
-# descargarEmpleadosSemantica()
-# empleados = leerEmpleados()
+# Process
+# Descarga de supervigilancia las personas en proceso de acreditación y ya acreditadas
+descargarSupervigilancia(acreditadosUrl)
+acreditados = leerSupervigilancia()
+acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
-# # Añade la fecha de acreditación a quienes la tengan
-# empleados = aniadirFecha(empleados, enproceso, 'Estado')
-# empleados = aniadirFecha(empleados, acreditados, 'Vigen.Acr')
+descargarSupervigilancia(enprocesoUrl)
+enproceso = leerSupervigilancia()
+enproceso = enproceso.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
-# empleados = empleados[empleados['FECHA.ACR'] == 'Na']
-# fec_hoy = datetime.now()
-# fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
-# new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
-# empleados.to_excel(new_file, index=False, header=True)
+subirListaAcreditados()
 
-empleados = pd.read_excel(directorioDes + "\Acreditados26_10_2022_14_30.xlsx")
+# Descarga los empleados como están registrados actualmente en semantica
+descargarEmpleadosSemantica()
+empleados = leerEmpleados()
+
+# Añade la fecha de acreditación a quienes la tengan
+empleados = aniadirFecha(empleados, enproceso, 'Estado')
+empleados = aniadirFecha(empleados, acreditados, 'Vigen.Acr')
+
+empleados = empleados[empleados['FECHA.ACR'] == 'Na']
+fec_hoy = datetime.now()
+fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
+new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
+empleados.to_excel(new_file, index=False, header=True)
+
+# empleados = pd.read_excel(directorioDes + "\Acreditados27_10_2022_08_52.xlsx")
 descargarApos()
 
 driver.quit()
