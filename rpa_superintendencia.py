@@ -17,7 +17,7 @@ import os
 import shutil
 import datetime
 import glob
-from datetime import datetime
+from datetime import datetime, timedelta
 warnings.filterwarnings("ignore")
 
 #Settings de Chrome Selenium
@@ -55,12 +55,13 @@ empleadosCargos = ['ESCOLTA', 'MANEJADOR CANINO', 'OPERADOR (A) MEDIOS TECNOLOGI
 
 apoInicio = "APO8110072801"
 retirosVacios = pd.DataFrame(columns=['Nit','RazonSocial','TipoDocumento','NoDocumento','FechaRetiro'])
-registrosVacios = pd.DataFrame(columns=['Nit','RazonSocial','TipoDocumento','NoDocumento','FechaRetiro','Nombre1','Nombre2','Apellido1','Apellido2',
+solicitudesVacias = pd.DataFrame(columns=['Nit','RazonSocial','TipoDocumento','NoDocumento','FechaRetiro','Nombre1','Nombre2','Apellido1','Apellido2',
 'FechaNacimiento','Genero','Cargo','FechaVinculacion','CodigoCurso','NitEscuela','Nro','TipoEstablecimiento','TelefonoR','DireccionR','DireccionP',
 'departamento','Ciudad','EducacionBM','EducacionS','Discapacidad'])
 
 global loginBool
 loginBool = False
+eliminar = {}
 
 # Functions
 def descargarSupervigilancia(url): 
@@ -82,6 +83,7 @@ def descargarSupervigilancia(url):
 
 def leerUltimo(skipRows, delete, xls):
     old_file = max([directorioDes +'\\'+ f for f in os.listdir(directorioDes)], key=os.path.getctime)
+
     if xls:
         workbook = xlrd.open_workbook_xls(old_file, ignore_workbook_corruption=True)  
         df = pd.read_excel(workbook)
@@ -172,6 +174,7 @@ def leerEmpleados():
     df = df[df['CARGO'].isin(empleadosCargos)]
     df.loc[df['CARGO'] == empleadosCargos[2], 'CARGO'] = 'OPERADOR DE MEDIOS TECNOLOGICOS'
     df['FECHA.ACR'] = 'Na'
+    df['NUM_CARGOS'] = 0
     return df.sort_values(by=['IDENTIFICACIÓN', 'CARGO'], ascending=[True, True])
 
 def aniadirFecha(df1, df2, col):
@@ -182,13 +185,50 @@ def aniadirFecha(df1, df2, col):
             if df2.loc[df2.index[j],'Cargo'].strip() in df1.loc[df1.index[i],'CARGO'].strip():
                 df1.loc[df1.index[i],'FECHA.ACR'] = df2.loc[df2.index[j],col]
                 i += 1
+            else:
+                df1.loc[df1.index[i],'NUM_CARGOS'] = df1.loc[df1.index[i],'NUM_CARGOS'] + 1
             j += 1
         else:
             if(df1.iloc[i]['IDENTIFICACIÓN'] < df2.iloc[j]['IdNum']):
                 i+=1
             else:
+                eliminar[ str(df2.loc[df2.index[j],'IdNum']) ] = df2.loc[df2.index[j],'Cargo']
                 j+=1
+                
     return df1
+
+def FiltrarDescargar(iden, cargo, ignorarVencido):
+    empl_bus = driver.find_element(By.ID, 'form_numeroIdentificacion')
+    empl_bus.clear()
+    empl_bus.send_keys(iden)
+
+    empl_filtro = driver.find_element(By.ID, 'form_btnFiltro')
+    empl_filtro.click()
+    time.sleep(1)
+
+    btn_archivos = driver.find_element(By.ID, 'archivos')
+    btn_archivos.click()
+    btn_informe = driver.find_element(By.ID, 'form_btnInformeApo')
+    btn_informe.click()
+    
+    index = -1
+    rows = len(driver.find_elements(By.XPATH,"//table/tbody/tr"))
+
+    for t_row in range(1, (rows + 1)):
+        xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(7) + "]"
+        t_cargo = driver.find_element(By.XPATH, xPath).text
+        xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(8) + "]"
+        fecha = datetime.strptime(driver.find_element(By.XPATH, xPath).text, "%Y-%m-%d")
+        if(t_cargo in cargo and (fecha - datetime.today()).days > 30 or ignorarVencido):
+            index = t_row - 1
+            break
+
+    return index
+
+def verificarSitio(sitio):
+    if 'BOGOTA D.C.' in sitio:
+        sitio = 'BOGOTA'
+    return sitio
 
 def verificarNro(nro):
     if not nro.startswith('ECSP'):
@@ -205,7 +245,7 @@ def verificarNro(nro):
 
     return nro
 
-def obtenerTextoFecha():
+def obtenerNombreApo(num):
     todayDate = datetime.today()
     todayYear = str(todayDate.year)
     todayMonth = str(todayDate.month)
@@ -217,7 +257,36 @@ def obtenerTextoFecha():
         todayMonth = "0" + str(month)
     if day < 10:
         todayDay = "0" + str(day)
-    return todayYear + todayMonth + todayDay
+
+    filename = apoInicio + todayYear + todayMonth + todayDay
+    if num >= 10:
+        filename += str(num)
+    else:
+        filename += "0" + str(num)
+    filename += ".xls"
+    return filename
+
+def generarArchivoApoSolicitud(df, num):
+    df['Ciudad'] = df['Ciudad'].apply(verificarSitio)
+    df['departamento'] = df['departamento'].apply(verificarSitio)
+    df.loc[df['TelefonoR'] == 0, 'TelefonoR'] = 448518
+    df.loc[df['TelefonoR'] == 'NO FIGURA', 'TelefonoR'] = 448518
+    df['Nro'] = df['Nro'].apply(verificarNro)
+
+    filename = obtenerNombreApo(num)
+    print(directorioApo + "/" + filename)
+    
+    with pd.ExcelWriter(directorioApo + "/" + filename) as writer:
+        df.to_excel(writer, index=False, header=True, sheet_name="ApoDatos")
+        retirosVacios.to_excel(writer, index=False, header=True, sheet_name="Retiros")
+
+def generarArchivoApoRetiro(df, num):
+    filename = obtenerNombreApo(num)
+    print(directorioApo + "/" + filename)
+    
+    with pd.ExcelWriter(directorioApo + "/" + filename) as writer:
+        solicitudesVacias.to_excel(writer, index=False, header=True, sheet_name="ApoDatos")
+        df.to_excel(writer, index=False, header=True, sheet_name="Retiros")
 
 def descargarApos():
     driver.get(subirAcreditacionUrl)
@@ -225,80 +294,67 @@ def descargarApos():
 
     if not os.path.exists(directorioApo):
         os.makedirs(directorioApo)
+    
+    empleados.sort_values(by=['NUM_CARGOS', 'IDENTIFICACIÓN'], ascending=[True, True])
 
     informe_completo = pd.DataFrame()
+    retiros = pd.DataFrame()
     faltan = pd.DataFrame()
     apo_num = 1
 
+    for key in eliminar:
+        index = FiltrarDescargar(key, eliminar[key], True)
+        time.sleep(2)
+
+        informe_apo = leerUltimo(False, True, True)
+        if index != -1:
+            retiro_apo = informe_apo.filter(['Nit','RazonSocial','TipoDocumento','NoDocumento'], axis=1)
+            retiro_apo.loc[retiro_apo.index[0],['FechaRetiro']] = datetime.strftime(datetime.now() - timedelta(1), '%d/%m/%Y')
+            retiros = pd.concat([retiros, retiro_apo], ignore_index=True)
+        
+        if len(retiros.index) >= 10:
+            generarArchivoApoRetiro(retiros, apo_num)
+            apo_num += 1
+            retiros = pd.DataFrame()
+    
+    if len(retiros.index) > 0:
+        generarArchivoApoRetiro(retiros, apo_num)
+        apo_num += 1
+
     # for i in range(0,len(empleados.index)):
     for i in range(0,len(empleados.index)):
-        iden = str(empleados.loc[empleados.index[i],['IDENTIFICACIÓN']].item())
-        cargo = str(empleados.loc[empleados.index[i],['CARGO']].item())
-        
-        empl_bus = driver.find_element(By.ID, 'form_numeroIdentificacion')
-        empl_bus.clear()
-        empl_bus.send_keys(iden)
-
-        empl_filtro = driver.find_element(By.ID, 'form_btnFiltro')
-        empl_filtro.click()
-        time.sleep(1)
-
-        btn_archivos = driver.find_element(By.ID, 'archivos')
-        btn_archivos.click()
-        btn_informe = driver.find_element(By.ID, 'form_btnInformeApo')
-        btn_informe.click()
-        
-        index = -1
-        rows = len(driver.find_elements(By.XPATH,"//table/tbody/tr"))
-
-        for t_row in range(1, (rows + 1)):
-            xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(7) + "]"
-            t_cargo = driver.find_element(By.XPATH, xPath).text
-            xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(8) + "]"
-            fecha = datetime.strptime(driver.find_element(By.XPATH, xPath).text, "%Y-%m-%d")
-            if(t_cargo in cargo and (fecha - datetime.today()).days > 30):
-                index = t_row - 1
+        index = FiltrarDescargar(
+            str(empleados.loc[empleados.index[i],['IDENTIFICACIÓN']].item()),
+            str(empleados.loc[empleados.index[i],['CARGO']].item()), False)
         
         time.sleep(2)
 
-        filename = max(glob.glob(directorioDes + r'\*.xls'), key=os.path.getctime)
         informe_apo = leerUltimo(False, True, True)
         if index != -1:
             informe_apo = informe_apo.iloc[[index]]
             informe_completo = pd.concat([informe_completo, informe_apo], ignore_index=True)
+            if empleados.loc[empleados.index[i],['NUM_CARGOS']].item() >= 2:
+                retiro_apo = informe_apo.filter(['Nit','RazonSocial','TipoDocumento','NoDocumento'], axis=1)
+                retiro_apo.loc[retiro_apo.index[0],['FechaRetiro']] = datetime.strftime(datetime.now() - timedelta(1), '%d/%m/%Y')
+                retiros = pd.concat([retiros, retiro_apo], ignore_index=True)
         else:
             faltan = faltan.append(empleados.iloc[[i]], ignore_index=True)
         
         if len(informe_completo.index) >= 10:
-            informe_completo.loc[informe_completo['Ciudad'] == 'BOGOTA D.C.', 'Ciudad'] = 'BOGOTA'
-            informe_completo.loc[informe_completo['TelefonoR'] == 0, 'TelefonoR'] = 448518
-            informe_completo.loc[informe_completo['TelefonoR'] == 'NO FIGURA', 'TelefonoR'] = 448518
-            informe_completo['Nro'] = informe_completo['Nro'].apply(verificarNro)
+            if len(retiros.index) > 0:
+                generarArchivoApoRetiro(retiros, apo_num)
+                apo_num += 1
+                retiros = pd.DataFrame()
 
-            filename = apoInicio + obtenerTextoFecha()
-            if apo_num >= 10:
-                filename += str(apo_num)
-            else:
-                filename += "0" + str(apo_num)
-            filename += ".xls"
+            generarArchivoApoSolicitud(informe_completo, apo_num)
             apo_num += 1
-
-            print(directorioApo + "/" + filename)
-            
-            with pd.ExcelWriter(directorioApo + "/" + filename) as writer:
-                informe_completo.to_excel(writer, index=False, header=True, sheet_name="ApoDatos")
-                retirosVacios.to_excel(writer, index=False, header=True, sheet_name="Retiros")
             informe_completo = pd.DataFrame()
     
     if informe_completo.shape[0] > 0:
-        filename = filename[:-6]
-        if apo_num >= 10:
-            filename += str(apo_num)
-        else:
-            filename += "0" + str(apo_num)
-        filename += ".xlsx"
+        if len(retiros.index) > 0:
+            generarArchivoApoRetiro(retiros, apo_num)
+        generarArchivoApoSolicitud(informe_completo, apo_num)
 
-        informe_completo.to_excel(filename, index=False, header=True)
     faltan.to_excel(directorioDes + "/faltan.xlsx", index=False, header=True)
 
 # Process
@@ -327,7 +383,10 @@ fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
 new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
 empleados.to_excel(new_file, index=False, header=True)
 
-# empleados = pd.read_excel(directorioDes + "\Acreditados27_10_2022_08_52.xlsx")
+eliminarDf = pd.DataFrame(data=eliminar, index=[0])
+eliminarDf.to_excel(directorioDes + "\NoEnSeracis.xlsx", index=False, header=True)
+
+# empleados = pd.read_excel(directorioDes + "\Acreditados28_10_2022_08_08.xlsx")
 descargarApos()
 
 driver.quit()
