@@ -14,6 +14,7 @@ import pandas as pd
 import openpyxl
 import xlrd
 import os
+import json
 import shutil
 import datetime
 import glob
@@ -82,9 +83,9 @@ def descargarSupervigilancia(url):
     time.sleep(5)
 
 def leerUltimo(skipRows, delete, xls):
-    old_file = max([directorioDes +'\\'+ f for f in os.listdir(directorioDes)], key=os.path.getctime)
-
+    old_file = max([directorioDes +'\\'+ f for f in os.listdir(directorioDes) ], key=os.path.getctime)
     if xls:
+        old_file = max([directorioDes +'\\'+ f for f in os.listdir(directorioDes) if f.endswith(".xls") ], key=os.path.getctime)
         workbook = xlrd.open_workbook_xls(old_file, ignore_workbook_corruption=True)  
         df = pd.read_excel(workbook)
     elif skipRows:
@@ -92,7 +93,12 @@ def leerUltimo(skipRows, delete, xls):
     else:
         df = pd.read_excel(old_file)
     if delete:
+        print(old_file)
+
         os.remove(old_file)
+        while os.path.exists(old_file):
+            time.sleep(1)
+        time.sleep(2)
     return df
 
 def leerSupervigilancia():
@@ -147,6 +153,8 @@ def cargarArchivoNuevaVentana(toClick, filepath, writeNum):
     wait.until(EC.number_of_windows_to_be(1))
     driver.switch_to.window(original_window)
     os.remove(filepath)
+    while os.path.exists(filepath):
+        time.sleep(1)
 
 def descargarEmpleadosSemantica():
     driver.get(empleadosUrl)
@@ -205,21 +213,23 @@ def FiltrarDescargar(iden, cargo, ignorarVencido):
     empl_filtro = driver.find_element(By.ID, 'form_btnFiltro')
     empl_filtro.click()
     time.sleep(1)
+    
+    rows = len(driver.find_elements(By.XPATH,"//table/tbody/tr"))
+    if rows <= 0:
+        return -1
 
     btn_archivos = driver.find_element(By.ID, 'archivos')
     btn_archivos.click()
     btn_informe = driver.find_element(By.ID, 'form_btnInformeApo')
     btn_informe.click()
-    
-    index = -1
-    rows = len(driver.find_elements(By.XPATH,"//table/tbody/tr"))
 
+    index = -1
     for t_row in range(1, (rows + 1)):
         xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(7) + "]"
         t_cargo = driver.find_element(By.XPATH, xPath).text
         xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(8) + "]"
         fecha = datetime.strptime(driver.find_element(By.XPATH, xPath).text, "%Y-%m-%d")
-        if(t_cargo in cargo and (fecha - datetime.today()).days > 30 or ignorarVencido):
+        if(t_cargo in cargo and (fecha - datetime.today()).days > 20 or ignorarVencido):
             index = t_row - 1
             break
 
@@ -274,7 +284,6 @@ def generarArchivoApoSolicitud(df, num):
     df['Nro'] = df['Nro'].apply(verificarNro)
 
     filename = obtenerNombreApo(num)
-    print(directorioApo + "/" + filename)
     
     with pd.ExcelWriter(directorioApo + "/" + filename) as writer:
         df.to_excel(writer, index=False, header=True, sheet_name="ApoDatos")
@@ -282,7 +291,6 @@ def generarArchivoApoSolicitud(df, num):
 
 def generarArchivoApoRetiro(df, num):
     filename = obtenerNombreApo(num)
-    print(directorioApo + "/" + filename)
     
     with pd.ExcelWriter(directorioApo + "/" + filename) as writer:
         solicitudesVacias.to_excel(writer, index=False, header=True, sheet_name="ApoDatos")
@@ -304,10 +312,15 @@ def descargarApos():
 
     for key in eliminar:
         index = FiltrarDescargar(key, eliminar[key], True)
-        time.sleep(2)
 
-        informe_apo = leerUltimo(False, True, True)
         if index != -1:
+            time.sleep(2)
+            while not os.path.exists(directorioDes + "/" + obtenerNombreApo(1)):
+                time.sleep(1)
+            
+            informe_apo = leerUltimo(False, True, True)
+            informe_apo = informe_apo.iloc[[index]]
+
             retiro_apo = informe_apo.filter(['Nit','RazonSocial','TipoDocumento','NoDocumento'], axis=1)
             retiro_apo.loc[retiro_apo.index[0],['FechaRetiro']] = datetime.strftime(datetime.now() - timedelta(1), '%d/%m/%Y')
             retiros = pd.concat([retiros, retiro_apo], ignore_index=True)
@@ -321,16 +334,17 @@ def descargarApos():
         generarArchivoApoRetiro(retiros, apo_num)
         apo_num += 1
 
-    # for i in range(0,len(empleados.index)):
     for i in range(0,len(empleados.index)):
         index = FiltrarDescargar(
             str(empleados.loc[empleados.index[i],['IDENTIFICACIÓN']].item()),
             str(empleados.loc[empleados.index[i],['CARGO']].item()), False)
         
-        time.sleep(2)
-
-        informe_apo = leerUltimo(False, True, True)
         if index != -1:
+            time.sleep(2)
+            while not os.path.exists(directorioDes + "/" + obtenerNombreApo(1)):
+                time.sleep(1)
+
+            informe_apo = leerUltimo(False, True, True)
             informe_apo = informe_apo.iloc[[index]]
             informe_completo = pd.concat([informe_completo, informe_apo], ignore_index=True)
             if empleados.loc[empleados.index[i],['NUM_CARGOS']].item() >= 2:
@@ -357,36 +371,39 @@ def descargarApos():
 
     faltan.to_excel(directorioDes + "/faltan.xlsx", index=False, header=True)
 
-# Process
-# Descarga de supervigilancia las personas en proceso de acreditación y ya acreditadas
-descargarSupervigilancia(acreditadosUrl)
-acreditados = leerSupervigilancia()
-acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
+if os.path.exists(directorioDes + r"\Acreditados.xlsx") and os.path.exists(directorioDes + r"\NoEnSeracis.txt"):
+    empleados = pd.read_excel(directorioDes + r"\Acreditados.xlsx")
+    with open(directorioDes + r"\NoEnSeracis.txt") as json_file:
+        eliminar = json.load(json_file)
+else:
+    # Process
+    # Descarga de supervigilancia las personas en proceso de acreditación y ya acreditadas
+    descargarSupervigilancia(acreditadosUrl)
+    acreditados = leerSupervigilancia()
+    acreditados = acreditados.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
-descargarSupervigilancia(enprocesoUrl)
-enproceso = leerSupervigilancia()
-enproceso = enproceso.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
+    descargarSupervigilancia(enprocesoUrl)
+    enproceso = leerSupervigilancia()
+    enproceso = enproceso.sort_values(by=['IdNum', 'Cargo'], ascending=[True, True])
 
-subirListaAcreditados()
+    subirListaAcreditados()
 
-# Descarga los empleados como están registrados actualmente en semantica
-descargarEmpleadosSemantica()
-empleados = leerEmpleados()
+    # Descarga los empleados como están registrados actualmente en semantica
+    descargarEmpleadosSemantica()
+    empleados = leerEmpleados()
 
-# Añade la fecha de acreditación a quienes la tengan
-empleados = aniadirFecha(empleados, enproceso, 'Estado')
-empleados = aniadirFecha(empleados, acreditados, 'Vigen.Acr')
+    # Añade la fecha de acreditación a quienes la tengan
+    empleados = aniadirFecha(empleados, enproceso, 'Estado')
+    empleados = aniadirFecha(empleados, acreditados, 'Vigen.Acr')
+    empleados = empleados[empleados['FECHA.ACR'] == 'Na']
 
-empleados = empleados[empleados['FECHA.ACR'] == 'Na']
-fec_hoy = datetime.now()
-fec_hoy = fec_hoy.strftime('%d_%m_%Y_%H_%M')
-new_file = directorioDes + "\Acreditados" + fec_hoy + ".xlsx"
-empleados.to_excel(new_file, index=False, header=True)
+    new_file = directorioDes + r"\Acreditados.xlsx"
+    empleados.to_excel(new_file, index=False, header=True)
 
-eliminarDf = pd.DataFrame(data=eliminar, index=[0])
-eliminarDf.to_excel(directorioDes + "\NoEnSeracis.xlsx", index=False, header=True)
+    new_file = directorioDes + r"\NoEnSeracis.txt"
+    with open(new_file, 'w') as convert_file:
+        convert_file.write(json.dumps(eliminar))
 
-# empleados = pd.read_excel(directorioDes + "\Acreditados28_10_2022_08_08.xlsx")
 descargarApos()
 
 driver.quit()
