@@ -19,7 +19,12 @@ import shutil
 import datetime
 import glob
 from datetime import datetime, timedelta
+from pathlib import Path
 warnings.filterwarnings("ignore")
+
+# Paths 
+directorioDes = str(Path.home() / "Downloads")
+directorioApo = "./APOS"
 
 #Settings de Chrome Selenium
 
@@ -29,15 +34,12 @@ options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
 options.add_experimental_option("excludeSwitches", ["enable-automation"])
 options.add_experimental_option('excludeSwitches', ['enable-logging'])
-chrome_prefs = {"download.default_directory": r"C:\Users\nicol\Downloads"}
+chrome_prefs = {"download.default_directory": directorioDes}
 options.experimental_options["prefs"] = chrome_prefs
 
-driver = webdriver.Chrome(executable_path=r'C:\Users\nicol\Downloads\chromedriver_win32\chromedriver.exe',chrome_options=options)
+driver = webdriver.Chrome(executable_path=r'./chromedriver.exe',chrome_options=options)
 wait = WebDriverWait(driver, 10)
 
-# Paths 
-directorioDes = r"C:\Users\nicol\Downloads"
-directorioApo = r"C:\Users\nicol\Downloads\APOS"
 
 acreditadosUrl = "https://apo.supervigilancia.gov.co/AcreditaPO/BuscaEmprapo.aspx"
 acreditadosArchivo = "Informacion de Companias.xlsx"
@@ -224,16 +226,23 @@ def FiltrarDescargar(iden, cargo, ignorarVencido):
     btn_informe.click()
 
     index = -1
+    renovar = False
+
     for t_row in range(1, (rows + 1)):
         xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(7) + "]"
         t_cargo = driver.find_element(By.XPATH, xPath).text
         xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(8) + "]"
         fecha = datetime.strptime(driver.find_element(By.XPATH, xPath).text, "%Y-%m-%d")
-        if(t_cargo in cargo and (fecha - datetime.today()).days > 20 or ignorarVencido):
+        if(t_cargo in cargo and (fecha - datetime.today()).days > 0 or ignorarVencido):
             index = t_row - 1
+            renovar = True
+            break
+        if(t_cargo in cargo and (fecha - datetime.today()).days > 45 or ignorarVencido):
+            index = t_row - 1
+            renovar = False
             break
 
-    return index
+    return index, renovar
 
 def verificarSitio(sitio):
     if 'BOGOTA D.C.' in sitio:
@@ -307,11 +316,13 @@ def descargarApos():
 
     informe_completo = pd.DataFrame()
     retiros = pd.DataFrame()
+    debenRenovar = pd.DataFrame()
     faltan = pd.DataFrame()
     apo_num = 1
 
+    counter = 0
     for key in eliminar:
-        index = FiltrarDescargar(key, eliminar[key], True)
+        index, renovar = FiltrarDescargar(key, eliminar[key], True)
 
         if index != -1:
             time.sleep(2)
@@ -319,6 +330,7 @@ def descargarApos():
                 time.sleep(1)
             
             informe_apo = leerUltimo(False, True, True)
+            counter+=1
             informe_apo = informe_apo.iloc[[index]]
 
             retiro_apo = informe_apo.filter(['Nit','RazonSocial','TipoDocumento','NoDocumento'], axis=1)
@@ -329,17 +341,23 @@ def descargarApos():
             generarArchivoApoRetiro(retiros, apo_num)
             apo_num += 1
             retiros = pd.DataFrame()
+        
+        if counter > 8:
+            break
     
     if len(retiros.index) > 0:
         generarArchivoApoRetiro(retiros, apo_num)
         apo_num += 1
 
-    for i in range(0,len(empleados.index)):
-        index = FiltrarDescargar(
+    for i in range(0,21):
+    # for i in range(0,len(empleados.index)):
+        index, renovar = FiltrarDescargar(
             str(empleados.loc[empleados.index[i],['IDENTIFICACIÓN']].item()),
             str(empleados.loc[empleados.index[i],['CARGO']].item()), False)
         
         if index != -1:
+            if renovar:
+                debenRenovar.append(empleados.iloc[[i]], ignore_index=True)
             time.sleep(2)
             while not os.path.exists(directorioDes + "/" + obtenerNombreApo(1)):
                 time.sleep(1)
@@ -370,6 +388,7 @@ def descargarApos():
         generarArchivoApoSolicitud(informe_completo, apo_num)
 
     faltan.to_excel(directorioDes + "/faltan.xlsx", index=False, header=True)
+    debenRenovar.to_excel(directorioDes + "/renovar.xlsx", index=False, header=True)
 
 if os.path.exists(directorioDes + r"\Acreditados.xlsx") and os.path.exists(directorioDes + r"\NoEnSeracis.txt"):
     empleados = pd.read_excel(directorioDes + r"\Acreditados.xlsx")
