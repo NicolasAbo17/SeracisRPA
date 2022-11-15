@@ -46,8 +46,8 @@ seracisNit = "811007280"
 enprocesoUrl = "https://apo.supervigilancia.gov.co/Acreditapo/BuscaEnTram.aspx"
 enprocesoArchivo = "Informacion de Companias (1).xlsx"
 
-empleadosUrl = "http://192.168.2.95/prueba/public/index.php/recursohumano/administracion/recurso/empleado/lista"
-subirAcreditacionUrl = "http://192.168.2.95/prueba/public/index.php/recursohumano/movimiento/recurso/acreditacion/lista"
+empleadosUrl = "https://corporativo.seracis.com/seracis/public/index.php/recursohumano/administracion/recurso/empleado/lista"
+subirAcreditacionUrl = "https://corporativo.seracis.com/seracis/public/index.php/recursohumano/movimiento/recurso/acreditacion/lista"
 usuarioSemantica = "L.BOTERO"
 
 empleadosArchivo = "empleados.xlsx"
@@ -82,25 +82,20 @@ def descargarSupervigilancia(url):
 
     time.sleep(5)
 
-def leerUltimo(skipRows, delete, xls):
+def leerUltimo(skipRows, delete):
     old_file = max([directorioDes +'\\'+ f for f in os.listdir(directorioDes) ], key=os.path.getctime)
-    if xls:
-        old_file = max([directorioDes +'\\'+ f for f in os.listdir(directorioDes) if f.endswith(".xls") ], key=os.path.getctime)
-        workbook = xlrd.open_workbook_xls(old_file, ignore_workbook_corruption=True)  
-        df = pd.read_excel(workbook)
-    elif skipRows:
+    if skipRows:
         df = pd.read_excel(old_file, skiprows=[0])
     else:
         df = pd.read_excel(old_file)
     if delete:
-        print(old_file)
         os.remove(old_file)
         while os.path.exists(old_file):
             time.sleep(1)
     return df
 
 def leerSupervigilancia():
-    return leerUltimo(True, False, False)
+    return leerUltimo(True, False)
 
 def loginSemantica():
     global loginBool
@@ -175,7 +170,7 @@ def descargarEmpleadosSemantica():
     time.sleep(8)
 
 def leerEmpleados():
-    df = leerUltimo(False, True, False)
+    df = leerUltimo(False, True)
     df.drop(df.columns.difference(empleadosColumnas), 1, inplace=True)
     df = df[df['CARGO'].isin(empleadosCargos)]
     df.loc[df['CARGO'] == empleadosCargos[2], 'CARGO'] = 'OPERADOR DE MEDIOS TECNOLOGICOS'
@@ -278,11 +273,35 @@ def obtenerNombreApo(num):
     filename += ".xls"
     return filename
 
+def leerApoXls(filename):
+    workbook = xlrd.open_workbook_xls(filename, ignore_workbook_corruption=True)  
+    df = pd.read_excel(workbook)
+
+    os.remove(filename)
+    while os.path.exists(filename):
+        time.sleep(1)
+    return df
+
+def obtenerNumCargo(cargo):
+    cargo = cargo.strip()
+    if 'VIGILANTE' in cargo:
+        return 1
+    elif 'ESCOLTA' in cargo:
+        return 2
+    elif 'SUPERVISOR' in cargo:
+        return 4
+    elif 'OPERADOR' in cargo:
+        return 5
+    elif 'MANEJADOR CANINO' in cargo:
+        return 6
+
+    return 1
+
 def generarArchivoApoSolicitud(df, num):
     df['Ciudad'] = df['Ciudad'].apply(verificarSitio)
     df['departamento'] = df['departamento'].apply(verificarSitio)
     df.loc[df['TelefonoR'] == 0, 'TelefonoR'] = 448518
-    df.loc[df['TelefonoR'] == 'NO FIGURA', 'TelefonoR'] = 448518
+    df.loc[df['TelefonoR'] == 'NO FIGURA' or df['TelefonoR'] == 'X' or df['TelefonoR'] == 'NO INFORMA', 'TelefonoR'] = 448518
     df['Nro'] = df['Nro'].apply(verificarNro)
 
     filename = obtenerNombreApo(num)
@@ -311,9 +330,13 @@ def descargarApos():
     retiros = pd.DataFrame()
     debenRenovar = pd.DataFrame()
     faltan = pd.DataFrame()
-    apo_num = 1
+    apo_num = 28
 
+    counter = 0
     for key in eliminar:
+        counter += 1
+        print(str(counter) + "/" + str(len(eliminar)))
+        
         index, renovar = FiltrarDescargar(key, eliminar[key], True)
 
         if index != -1:
@@ -321,7 +344,7 @@ def descargarApos():
             while not os.path.exists(directorioDes + "/" + obtenerNombreApo(1)):
                 time.sleep(1)
 
-            informe_apo = leerUltimo(False, True, True)
+            informe_apo = leerApoXls(directorioDes + "/" + obtenerNombreApo(1))
             informe_apo = informe_apo.iloc[[index]]
 
             retiro_apo = informe_apo.filter(['Nit','RazonSocial','TipoDocumento','NoDocumento'], axis=1)
@@ -338,6 +361,7 @@ def descargarApos():
         apo_num += 1
 
     for i in range(0,len(empleados.index)):
+        print(str(i) + "/" + str(len(empleados.index)))
         index, renovar = FiltrarDescargar(
             str(empleados.loc[empleados.index[i],['IDENTIFICACIÓN']].item()),
             str(empleados.loc[empleados.index[i],['CARGO']].item()), False)
@@ -350,8 +374,11 @@ def descargarApos():
             while not os.path.exists(directorioDes + "/" + obtenerNombreApo(1)):
                 time.sleep(1)
 
-            informe_apo = leerUltimo(False, True, True)
+            informe_apo = leerApoXls(directorioDes + "/" + obtenerNombreApo(1))
             informe_apo = informe_apo.iloc[[index]]
+            if len(str(informe_apo['Cargo'].item()).strip()) == 0:
+                informe_apo['Cargo'] = obtenerNumCargo(empleados.loc[empleados.index[i],['CARGO']].item())
+            
             informe_completo = pd.concat([informe_completo, informe_apo], ignore_index=True)
             if empleados.loc[empleados.index[i],['NUM_CARGOS']].item() >= 2:
                 retiro_apo = informe_apo.filter(['Nit','RazonSocial','TipoDocumento','NoDocumento'], axis=1)
@@ -369,6 +396,10 @@ def descargarApos():
             generarArchivoApoSolicitud(informe_completo, apo_num)
             apo_num += 1
             informe_completo = pd.DataFrame()
+        elif len(retiros.index) >= 10:
+            generarArchivoApoRetiro(retiros, apo_num)
+            apo_num += 1
+            retiros = pd.DataFrame()
     
     if informe_completo.shape[0] > 0:
         if len(retiros.index) > 0:
