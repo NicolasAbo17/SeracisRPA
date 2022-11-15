@@ -23,8 +23,8 @@ from pathlib import Path
 warnings.filterwarnings("ignore")
 
 # Paths 
-directorioDes = str(Path.home() / "Downloads")
-directorioApo = "./APOS"
+directorioDes = str(Path.home()) + "/Downloads"
+directorioApo = str(Path.home()) + "/Downloads/APOS"
 
 #Settings de Chrome Selenium
 
@@ -34,8 +34,6 @@ options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
 options.add_experimental_option("excludeSwitches", ["enable-automation"])
 options.add_experimental_option('excludeSwitches', ['enable-logging'])
-chrome_prefs = {"download.default_directory": directorioDes}
-options.experimental_options["prefs"] = chrome_prefs
 
 driver = webdriver.Chrome(executable_path=r'./chromedriver.exe',chrome_options=options)
 wait = WebDriverWait(driver, 10)
@@ -96,11 +94,9 @@ def leerUltimo(skipRows, delete, xls):
         df = pd.read_excel(old_file)
     if delete:
         print(old_file)
-
         os.remove(old_file)
         while os.path.exists(old_file):
             time.sleep(1)
-        time.sleep(2)
     return df
 
 def leerSupervigilancia():
@@ -218,12 +214,7 @@ def FiltrarDescargar(iden, cargo, ignorarVencido):
     
     rows = len(driver.find_elements(By.XPATH,"//table/tbody/tr"))
     if rows <= 0:
-        return -1
-
-    btn_archivos = driver.find_element(By.ID, 'archivos')
-    btn_archivos.click()
-    btn_informe = driver.find_element(By.ID, 'form_btnInformeApo')
-    btn_informe.click()
+        return -1, False
 
     index = -1
     renovar = False
@@ -233,14 +224,16 @@ def FiltrarDescargar(iden, cargo, ignorarVencido):
         t_cargo = driver.find_element(By.XPATH, xPath).text
         xPath = "//table/tbody/tr[" + str(t_row) + "]/td[" + str(8) + "]"
         fecha = datetime.strptime(driver.find_element(By.XPATH, xPath).text, "%Y-%m-%d")
-        if(t_cargo in cargo and (fecha - datetime.today()).days > 0 or ignorarVencido):
+        if( (t_cargo in cargo and (fecha - datetime.today()).days > 0) or ignorarVencido):
             index = t_row - 1
-            renovar = True
+            renovar = (fecha - datetime.today()).days <= 45
             break
-        if(t_cargo in cargo and (fecha - datetime.today()).days > 45 or ignorarVencido):
-            index = t_row - 1
-            renovar = False
-            break
+
+    if index != -1:
+        btn_archivos = driver.find_element(By.ID, 'archivos')
+        btn_archivos.click()
+        btn_informe = driver.find_element(By.ID, 'form_btnInformeApo')
+        btn_informe.click()
 
     return index, renovar
 
@@ -320,7 +313,6 @@ def descargarApos():
     faltan = pd.DataFrame()
     apo_num = 1
 
-    counter = 0
     for key in eliminar:
         index, renovar = FiltrarDescargar(key, eliminar[key], True)
 
@@ -328,9 +320,8 @@ def descargarApos():
             time.sleep(2)
             while not os.path.exists(directorioDes + "/" + obtenerNombreApo(1)):
                 time.sleep(1)
-            
+
             informe_apo = leerUltimo(False, True, True)
-            counter+=1
             informe_apo = informe_apo.iloc[[index]]
 
             retiro_apo = informe_apo.filter(['Nit','RazonSocial','TipoDocumento','NoDocumento'], axis=1)
@@ -341,16 +332,12 @@ def descargarApos():
             generarArchivoApoRetiro(retiros, apo_num)
             apo_num += 1
             retiros = pd.DataFrame()
-        
-        if counter > 8:
-            break
     
     if len(retiros.index) > 0:
         generarArchivoApoRetiro(retiros, apo_num)
         apo_num += 1
 
-    for i in range(0,21):
-    # for i in range(0,len(empleados.index)):
+    for i in range(0,len(empleados.index)):
         index, renovar = FiltrarDescargar(
             str(empleados.loc[empleados.index[i],['IDENTIFICACIÓN']].item()),
             str(empleados.loc[empleados.index[i],['CARGO']].item()), False)
@@ -358,6 +345,7 @@ def descargarApos():
         if index != -1:
             if renovar:
                 debenRenovar.append(empleados.iloc[[i]], ignore_index=True)
+
             time.sleep(2)
             while not os.path.exists(directorioDes + "/" + obtenerNombreApo(1)):
                 time.sleep(1)
