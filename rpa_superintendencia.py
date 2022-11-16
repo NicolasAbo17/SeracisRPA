@@ -18,6 +18,7 @@ import json
 import shutil
 import datetime
 import glob
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 warnings.filterwarnings("ignore")
@@ -237,6 +238,13 @@ def verificarSitio(sitio):
         sitio = 'BOGOTA'
     return sitio
 
+def verificarNumero(tel):
+    texNum = str(tel)
+    texNum = re.sub(r'[^0-9]', '', texNum)
+    if texNum == "" or texNum == "0":
+        texNum = "4484518"
+    return int(texNum)
+
 def verificarNro(nro):
     if not nro.startswith('ECSP'):
         for chr in nro:
@@ -300,8 +308,7 @@ def obtenerNumCargo(cargo):
 def generarArchivoApoSolicitud(df, num):
     df['Ciudad'] = df['Ciudad'].apply(verificarSitio)
     df['departamento'] = df['departamento'].apply(verificarSitio)
-    df.loc[df['TelefonoR'] == 0, 'TelefonoR'] = 448518
-    df.loc[df['TelefonoR'] == 'NO FIGURA' or df['TelefonoR'] == 'X' or df['TelefonoR'] == 'NO INFORMA', 'TelefonoR'] = 448518
+    df['TelefonoR'] = df['TelefonoR'].apply(verificarNumero)
     df['Nro'] = df['Nro'].apply(verificarNro)
 
     filename = obtenerNombreApo(num)
@@ -330,7 +337,7 @@ def descargarApos():
     retiros = pd.DataFrame()
     debenRenovar = pd.DataFrame()
     faltan = pd.DataFrame()
-    apo_num = 28
+    apo_num = 1
 
     counter = 0
     for key in eliminar:
@@ -361,7 +368,7 @@ def descargarApos():
         apo_num += 1
 
     for i in range(0,len(empleados.index)):
-        print(str(i) + "/" + str(len(empleados.index)))
+        print(str(i+1) + "/" + str(len(empleados.index)))
         index, renovar = FiltrarDescargar(
             str(empleados.loc[empleados.index[i],['IDENTIFICACIÓN']].item()),
             str(empleados.loc[empleados.index[i],['CARGO']].item()), False)
